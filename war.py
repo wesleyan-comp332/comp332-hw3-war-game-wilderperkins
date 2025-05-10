@@ -62,7 +62,6 @@ def kill_game(game):
     """
     TODO: If either client sends a bad message, immediately nuke the game.
     """
-    game = namedtuple("Game", 'p1 p2 p1deck p2deck p1next p2next p1score p2score turn sock')
 
 def compare_cards(card1: int, card2: int):
     """
@@ -118,7 +117,17 @@ def serve_game(host, port):
     perform the war protocol to serve a game of war between each client.
     This function should run forever, continually serving clients.
     """
+    try:
+        # Code adapted from socketserver documentation
+        with socketserver.TCPServer((host, port), WarHandler) as server:
+            server.serve_forever()
+    except KeyboardInterrupt:
+        return
     
+class WarHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        logging.debug('addr: %s', self.client_address)
+        logging.debug('req: %s', self.request)
 
 async def limit_client(host, port, loop, sem):
     """
@@ -158,12 +167,13 @@ async def client(host, port, loop):
     except ConnectionResetError:
         logging.error("ConnectionResetError")
         return 0
-    except asyncio.streams.IncompleteReadError:
-        logging.error("asyncio.streams.IncompleteReadError")
+    except asyncio.IncompleteReadError:
+        logging.error("asyncio.IncompleteReadError")
         return 0
-    except OSError:
-        logging.error("OSError")
-        return 0
+    # Commenting out so I can see the actual error msg
+    # except OSError:
+    #     logging.error("OSError")
+    #     return 0
 
 def main(args):
     """
