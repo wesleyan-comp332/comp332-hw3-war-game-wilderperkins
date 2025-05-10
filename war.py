@@ -19,11 +19,11 @@ for each game which contain the game's state, for instance things like the
 socket, the cards given, the cards still available, etc.
 
 p1, p2: clients
-p1deck, p2deck: list[int]
-p1next, p2next: int -- index of next card to draw from deck
-p1score, p2score: int
-turn: bool (False=p1, True=p2)
+p1deck, p2deck: list[int] -- each player can only play cards in their deck
+p1played, p2played: list[int] -- can't replay an already-played card
 sock: socket
+
+Score is handled on client side
 """
 Game = namedtuple("Game", 'p1 p2 p1deck p2deck p1next p2next p1score p2score turn sock')
 
@@ -40,7 +40,6 @@ class Command(Enum):
     PLAYCARD = 2
     PLAYRESULT = 3
 
-
 class Result(Enum):
     """
     The byte values sent as the payload byte of a PLAYRESULT message.
@@ -49,23 +48,25 @@ class Result(Enum):
     DRAW = 1
     LOSE = 2
 
-def readexactly(sock, numbytes):
+def readexactly(sock: socket.socket, numbytes: int):
     """
     TODO: Accumulate exactly `numbytes` from `sock` and return those. If EOF is found
     before numbytes have been received, be sure to account for that here or in
     the caller.
     """
-    
+    b = sock.recv(numbytes)
+    logging.debug('Received bytes: %s', str(b))
+    return b
 
 def kill_game(game):
     """
     TODO: If either client sends a bad message, immediately nuke the game.
     """
+    game = namedtuple("Game", 'p1 p2 p1deck p2deck p1next p2next p1score p2score turn sock')
 
-
-def compare_cards(card1, card2):
+def compare_cards(card1: int, card2: int):
     """
-    TODO: Given an integer card representation, return -1 for card1 < card2,
+    Given an integer card representation, return -1 for card1 < card2,
     0 for card1 = card2, and 1 for card1 > card2
     """
     # Copy these because we're about to change them
@@ -89,26 +90,26 @@ def compare_cards(card1, card2):
         card2 = 11
     # Final comparison
     if card1 > card2:
-        logging.info(f'P1|%d|%d  >  P2|%d|%d', 
+        logging.debug('P1|%d|%d  >  P2|%d|%d', 
                      raw_card1, card1, raw_card2, card2)
         return 1
     elif card1 < card2:
-        logging.info(f'P1|%d|%d  <  P2|%d|%d', 
+        logging.debug('P1|%d|%d  <  P2|%d|%d', 
                      raw_card1, card1, raw_card2, card2)
         return -1
     else:
-        logging.info(f'P1|%d|%d  =  P2|%d|%d', 
+        logging.debug('P1|%d|%d  =  P2|%d|%d', 
                      raw_card1, card1, raw_card2, card2)
         return 0
 
 def deal_cards():
     """
-    TODO: Randomize a deck of cards (list of ints 0..51), and return two
+    Randomize a deck of cards (list of ints 0..51), and return two
     26 card "hands."
     """
     deck = range(52)
     random.shuffle(deck)
-    logging.info('Shuffled deck')
+    logging.debug('Shuffled deck')
     return (deck[0:26], deck[26:52])
 
 def serve_game(host, port):
