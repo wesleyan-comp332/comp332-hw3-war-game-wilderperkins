@@ -124,6 +124,7 @@ def serve_game(host, port):
     try:
         with socketserver.TCPServer((host, port), WarHandler) as server:
             while True:
+                print('==== Loop ====')
                 (sock, addr) = server.get_request()
                 logging.debug('sock: %s', sock)
                 logging.debug('addr: %s', addr)
@@ -138,10 +139,10 @@ def serve_game(host, port):
                     # either of the two clients (detect with sock/addr)
                     ingame = False
                     for g in games:
-                        if sock in (g.p1sock, g.p2sock):
+                        if addr in (g.p1addr, g.p2addr):
                             ingame = True
                             break
-                    logging.debug('ingame: %s', ingame)
+                    logging.debug('0 ingame: %s', ingame)
 
                     if ingame:
                         kill_game(g)
@@ -181,9 +182,11 @@ def serve_game(host, port):
                     g = games[0] # just to make the linter stop whining that
                                 # g might be undefined
                     for g in games:
-                        if sock in (g.p1sock, g.p2sock):
+                        logging.debug('test')
+                        if addr in (g.p1addr, g.p2addr):
                             ingame = True
                             break
+                    logging.debug('2 ingame: %s', ingame)
 
                     if ingame:
                         # Based on when we break, g will have the correct clients
@@ -257,10 +260,13 @@ async def client(host, port, loop):
         # send want game
         writer.write(b"\0\0")
         card_msg = await reader.readexactly(27)
+        logging.debug('Card msg: %s', list(card_msg))
         myscore = 0
         for card in card_msg[1:]:
             writer.write(bytes([Command.PLAYCARD.value, card]))
+            logging.debug('Played card: %d', card)
             result = await reader.readexactly(2)
+            logging.debug('Result: %d', result)
             if result[1] == Result.WIN.value:
                 myscore += 1
             elif result[1] == Result.LOSE.value:
