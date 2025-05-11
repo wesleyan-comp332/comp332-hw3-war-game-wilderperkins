@@ -18,14 +18,17 @@ up being faster. It would be a good idea to keep objects in each of these
 for each game which contain the game's state, for instance things like the
 socket, the cards given, the cards still available, etc.
 
-p1, p2: clients
-p1deck, p2deck: list[int] -- each player can only play cards in their deck
-p1played, p2played: list[int] -- can't replay an already-played card
-sock: socket
+p1sock, p2sock: socket
+p1addr, p2addr: tuple[str, int]
+p1deck, p2deck: list[int] - each player can only play cards in their deck
+p1play, p2play: int|None - store card each player wants to play till we get both
+discard: list[int] - list already-played cards to block their reuse
 
 Score is handled on client side
 """
-Game = namedtuple("Game", 'p1 p2 p1deck p2deck p1next p2next p1score p2score turn sock')
+Game = namedtuple("Game", 'p1sock p2sock p1addr p2addr \
+p1deck p2deck p1play p2play discard')
+games = []
 
 # Stores the clients waiting to get connected to other clients
 waiting_clients = []
@@ -62,6 +65,7 @@ def kill_game(game):
     """
     TODO: If either client sends a bad message, immediately nuke the game.
     """
+    logging.info('TODO: kill_game')
 
 def compare_cards(card1: int, card2: int):
     """
@@ -106,7 +110,7 @@ def deal_cards():
     Randomize a deck of cards (list of ints 0..51), and return two
     26 card "hands."
     """
-    deck = range(52)
+    deck = list(range(52))
     random.shuffle(deck)
     logging.debug('Shuffled deck')
     return (deck[0:26], deck[26:52])
@@ -118,16 +122,122 @@ def serve_game(host, port):
     This function should run forever, continually serving clients.
     """
     try:
-        # Code adapted from socketserver documentation
         with socketserver.TCPServer((host, port), WarHandler) as server:
-            server.serve_forever()
+            while True:
+                (sock, addr) = server.get_request()
+                logging.debug('sock: %s', sock)
+                logging.debug('addr: %s', addr)
+                # TODO: figure out which game we're in based on sock/addr
+
+                req_type = int(readexactly(sock, 1)[0])
+                logging.debug('req_type: %s (%s)', req_type, Command(req_type))
+
+                if Command(req_type) == Command.WANTGAME:
+                    # Reject if client already in game
+                    # TODO: Multithreading will ignore any requests not involving
+                    # either of the two clients (detect with sock/addr)
+                    ingame = False
+                    for g in games:
+                        if sock in (g.p1sock, g.p2sock):
+                            ingame = True
+                            break
+                    logging.debug('ingame: %s', ingame)
+
+                    if ingame:
+                        kill_game(g)
+                    else:
+                        # Add client to waiting room if they're not there already
+                        if (sock, addr) not in waiting_clients:
+                            waiting_clients.append( (sock, addr) )
+                            logging.debug('%d clients in waiting room: %s', 
+                                        len(waiting_clients), 
+                                        ' '.join([
+                                            str(x[1]) for x in waiting_clients
+                                        ]))
+
+                        if len(waiting_clients) >= 2:
+                            # If 2+ clients waiting, start game with the first 2 
+                            # members of waiting_clients
+                            decks = deal_cards()
+                            p1_sock_addr = waiting_clients.pop(0)
+                            p2_sock_addr = waiting_clients.pop(0) # was index 1
+                            g = Game(p1_sock_addr[0], p2_sock_addr[0],
+                                    p1_sock_addr[1], p2_sock_addr[1],
+                                    decks[0], decks[1], None, None, [])
+                            games.append(g)
+                            # Send GAMESTART message to clients
+                            g.p1sock.sendall(
+                                bytes([Command.GAMESTART.value]+g.p1deck))
+                            logging.debug('P1 deck sent: %s',
+                                decks[0])
+                            g.p2sock.sendall(
+                                bytes([Command.GAMESTART.value]+g.p2deck))
+                            logging.debug('P2 deck sent: %s',
+                                decks[1])
+
+                elif Command(req_type) == Command.PLAYCARD and len(games) > 0:
+                    # Only if in game
+                    ingame = False
+                    g = games[0] # just to make the linter stop whining that
+                                # g might be undefined
+                    for g in games:
+                        if sock in (g.p1sock, g.p2sock):
+                            ingame = True
+                            break
+
+                    if ingame:
+                        # Based on when we break, g will have the correct clients
+                        # Now, figure out which player number this is
+                        if sock == g.p1sock:
+                            p1 = True
+                        else:
+                            p1 = False
+
+                        # Payload = card ID (0 to 51)
+                        card_id = int(readexactly(sock, 1)[0])
+
+                        if p1:
+                            g.p1play = card_id
+                        else:
+                            g.p2play = card_id
+
+                        # If we have both players' cards, compare them
+                        # and send back who won
+                        if g.p1play is not None and g.p2play is not None:
+                            result = compare_cards(g.p1play, g.p2play)
+                            # 1 = p1 wins
+                            # -1 = p2 wins
+                            # 0 = tie
+                            if result == 1:
+                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.WIN.value]))
+                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.LOSE.value]))
+                            elif result == -1:
+                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.LOSE.value]))
+                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.WIN.value]))
+                            else: # 0
+                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.DRAW.value]))
+                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                        Result.DRAW.value]))
+                    else:
+                        # If request is sent and we aren't in game at all,
+                        # request is invalid
+                        logging.warning('Bad request %d: %s isn’t in a game', 
+                                        req_type, addr)
+                        kill_game(g)
+                else: # the other commands are sent by the server to the client
+                    logging.warning('Bad request %d', req_type)
+                    kill_game(g)
     except KeyboardInterrupt:
         return
     
 class WarHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        logging.debug('addr: %s', self.client_address)
-        logging.debug('req: %s', self.request)
+        pass
 
 async def limit_client(host, port, loop, sem):
     """
@@ -164,9 +274,9 @@ async def client(host, port, loop):
         logging.debug("Game complete, I %s", result)
         writer.close()
         return 1
-    except ConnectionResetError:
-        logging.error("ConnectionResetError")
-        return 0
+    # except ConnectionResetError:
+    #     logging.error("ConnectionResetError")
+    #     return 0
     except asyncio.IncompleteReadError:
         logging.error("asyncio.IncompleteReadError")
         return 0
@@ -193,6 +303,8 @@ def main(args):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
+        finally:
+            pass
         
         asyncio.set_event_loop(loop)
         
