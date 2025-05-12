@@ -225,6 +225,19 @@ def serve_game(host, port):
                     card_id = int(readexactly(sock, 1)[0])
                     logging.debug('Card ID %d', card_id)
 
+                    # Cards must be in interval [0, 51]
+                    if card_id < 0 or card_id > 51:
+                        logging.warning('Invalid card id %d', card_id)
+                        kill_game(g)
+                        continue
+
+                    # No reusing already-played cards
+                    if card_id in g.discard:
+                        logging.warning('Card id %d already used', card_id)
+                        kill_game(g)
+                        continue
+
+                    # Assign card to correct player
                     if p1:
                         g.p1play = card_id
                     else:
@@ -233,8 +246,18 @@ def serve_game(host, port):
 
                     # If we have both players' cards, compare them
                     # and send back who won
-                    # TODO: reject already-played cards
                     if g.p1play is not None and g.p2play is not None:
+                        # No playing cards that were never in your deck 
+                        # to begin with
+                        if g.p1play not in g.p1deck:
+                            logging.warning('%d not in p1 deck', g.p1play)
+                            kill_game(g)
+                            continue
+                        if g.p2play not in g.p2deck:
+                            logging.warning('%d not in p2 deck', g.p2play)
+                            kill_game(g)
+                            continue
+
                         result = compare_cards(g.p1play, g.p2play)
                         # 1 = p1 wins
                         # -1 = p2 wins
@@ -291,7 +314,7 @@ async def limit_client(host, port, loop, sem):
     async with sem:
         return await client(host, port, loop)
 
-async def client(host, port, loop):
+async def client(host, port, _): # loop unused
     """
     Run an individual client on a given event loop.
     You do not need to change this function.
