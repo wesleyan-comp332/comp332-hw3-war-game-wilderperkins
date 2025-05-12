@@ -168,9 +168,20 @@ def serve_game(host, port):
                         break
                 logging.debug('0 ingame: %s', ingame)
 
+                # "Payload" should always be 0, clear it out
+                raw_read = readexactly(sock, 1)
+                if len(raw_read) < 1:
+                    logging.warning('WANTGAME payload too short')
+                    kill_game(g)
+                    continue
+                payload = int(raw_read[0])
+                if payload != 0:
+                    logging.warning('WANTGAME payload must be 0')
+
                 if ingame:
-                    pass
-                    # kill_game(g)
+                    logging.warning('Sent WANTGAME while already in game')
+                    kill_game(g)
+                    continue
                 else:
                     # Add client to waiting room if they're not there already
                     if sock not in waiting_clients:
@@ -222,7 +233,12 @@ def serve_game(host, port):
                         p1 = False
 
                     # Payload = card ID (0 to 51)
-                    card_id = int(readexactly(sock, 1)[0])
+                    raw_read = readexactly(sock, 1)
+                    if len(raw_read) < 1:
+                        logging.warning('PLAYCARD payload too short')
+                        kill_game(g)
+                        continue
+                    card_id = int(raw_read[0])
                     logging.debug('Card ID %d', card_id)
 
                     # Cards must be in interval [0, 51]
