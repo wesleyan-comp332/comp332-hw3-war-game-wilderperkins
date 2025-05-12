@@ -2,7 +2,7 @@
 war card game client and server
 """
 import asyncio
-from collections import namedtuple
+# from collections import namedtuple
 from enum import Enum
 import logging
 import random
@@ -12,21 +12,8 @@ import socketserver
 import sys
 
 
-"""
-Namedtuples work like classes, but are much more lightweight so they end
-up being faster. It would be a good idea to keep objects in each of these
-for each game which contain the game's state, for instance things like the
-socket, the cards given, the cards still available, etc.
-
-p1sock, p2sock: socket
-p1addr, p2addr: tuple[str, int]
-p1deck, p2deck: list[int] - each player can only play cards in their deck
-p1play, p2play: int|None - store card each player wants to play till we get both
-discard: list[int] - list already-played cards to block their reuse
-turn: which socket to check next: False=p1, True=p2
-
-Score is handled on client side
-"""
+# namedtuples may be faster on performance, 
+# but they sure aren't faster for me to code with!
 # Game = namedtuple("Game", 'p1sock p2sock p1addr p2addr \
 # p1deck p2deck p1play p2play discard turn')
 class Game:
@@ -156,7 +143,11 @@ def serve_game(host, port):
                 addr = games[0].p1addr
                 games[0].turn = not games[0].turn
 
-            req_type = int(readexactly(sock, 1)[0])
+            raw_read = readexactly(sock, 1)
+            if len(raw_read) == 0:
+                kill_game(games[0])
+                return
+            req_type = int(raw_read[0])
             logging.debug('req_type: %s (%s)', req_type, Command(req_type))
 
             if Command(req_type) == Command.WANTGAME:
@@ -316,6 +307,7 @@ async def client(host, port, loop):
                 myscore += 1
             elif result[1] == Result.LOSE.value:
                 myscore -= 1
+            logging.debug('Score: %d', myscore)
         if myscore > 0:
             result = "won"
         elif myscore < 0:
