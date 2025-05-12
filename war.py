@@ -27,8 +27,20 @@ turn: which socket to check next: False=p1, True=p2
 
 Score is handled on client side
 """
-Game = namedtuple("Game", 'p1sock p2sock p1addr p2addr \
-p1deck p2deck p1play p2play discard turn')
+# Game = namedtuple("Game", 'p1sock p2sock p1addr p2addr \
+# p1deck p2deck p1play p2play discard turn')
+class Game:
+    def __init__(self, p1sock, p2sock, p1addr, p2addr, p1deck, p2deck, p1play, p2play, discard, turn):
+        self.p1sock = p1sock
+        self.p2sock = p2sock
+        self.p1addr = p1addr
+        self.p2addr = p2addr
+        self.p1deck = p1deck 
+        self.p2deck = p2deck
+        self.p1play = p1play
+        self.p2play = p2play
+        self.discard = discard
+        self.turn = turn
 games = []
 
 # Stores the clients waiting to get connected to other clients
@@ -123,134 +135,144 @@ def serve_game(host, port):
     This function should run forever, continually serving clients.
     """
     try:
-        with socketserver.TCPServer((host, port), WarHandler) as server:
-            server.timeout = .1
-            while True:
-                print('==== Loop ====')
-                # Need to call separately instead of using handle_request
-                # because we need to keep the socket and address
-                print(games)
-                if len(games) == 0:
-                    (sock, addr) = server.get_request()
-                    logging.debug('sock: %s', sock)
-                    logging.debug('addr: %s', addr)
-                elif games[0].turn: # i.e. if p2's turn
-                    sock = games[0].p2sock
-                    addr = games[0].p2addr
-                else: # i.e. if p1's turn
-                    sock = games[0].p1sock
-                    addr = games[0].p1addr
+        server = socketserver.TCPServer((host, port), WarHandler)
+        server.timeout = .1
+        while True:
+            print('==== Loop ====')
+            # Need to call separately instead of using handle_request
+            # because we need to keep the socket and address
+            if len(games) == 0:
+                (sock, addr) = server.get_request()
+                logging.debug('sock: %s', sock)
+                logging.debug('addr: %s', addr)
+            elif games[0].turn: # i.e. if p2's turn
+                sock = games[0].p2sock
+                addr = games[0].p2addr
+                games[0].turn = not games[0].turn
+            else: # i.e. if p1's turn
+                sock = games[0].p1sock
+                addr = games[0].p1addr
+                games[0].turn = not games[0].turn
 
-                req_type = int(readexactly(sock, 1)[0])
-                logging.debug('req_type: %s (%s)', req_type, Command(req_type))
+            req_type = int(readexactly(sock, 1)[0])
+            logging.debug('req_type: %s (%s)', req_type, Command(req_type))
 
-                if Command(req_type) == Command.WANTGAME:
-                    # Reject if client already in game
-                    # TODO: Multithreading ignores any requests not involving
-                    # either of the two clients (detect with sock/addr)
-                    ingame = False
-                    g = None
-                    for g in games:
-                        if addr in (g.p1addr, g.p2addr):
-                            ingame = True
-                            break
-                    logging.debug('0 ingame: %s', ingame)
+            if Command(req_type) == Command.WANTGAME:
+                # Reject if client already in game
+                # TODO: Multithreading ignores any requests not involving
+                # either of the two clients (detect with sock/addr)
+                ingame = False
+                g = None
+                for g in games:
+                    if addr in (g.p1addr, g.p2addr):
+                        ingame = True
+                        break
+                logging.debug('0 ingame: %s', ingame)
 
-                    if ingame:
-                        kill_game(g)
+                if ingame:
+                    pass
+                    # kill_game(g)
+                else:
+                    # Add client to waiting room if they're not there already
+                    if sock not in waiting_clients:
+                        waiting_clients.append(sock)
+                        logging.debug('Added %s to waiting room', sock)
+                        logging.debug('%d clients in waiting room: %s', 
+                                    len(waiting_clients), waiting_clients)
+
+                    if len(waiting_clients) >= 2:
+                        # If 2+ clients waiting, start game with the first 2 
+                        # members of waiting_clients
+                        decks = deal_cards()
+                        p1sock : socket.socket = waiting_clients.pop(0)
+                        p2sock : socket.socket = waiting_clients.pop(0)# was index 1
+                        print(p1sock, p2sock)
+                        g = Game(p1sock, p2sock,
+                                p1sock.getpeername(), p2sock.getpeername(),
+                                decks[0], decks[1], None, None, [], False)
+                        logging.info('New game between %s and %s', 
+                                    g.p1addr, g.p2addr)
+                        games.append(g)
+                        # Send GAMESTART message to clients
+                        g.p1sock.sendall(
+                            bytes([Command.GAMESTART.value]+g.p1deck))
+                        logging.debug('P1 deck sent: %s',
+                            decks[0])
+                        g.p2sock.sendall(
+                            bytes([Command.GAMESTART.value]+g.p2deck))
+                        logging.debug('P2 deck sent: %s',
+                            decks[1])
+
+            elif Command(req_type) == Command.PLAYCARD and len(games) > 0:
+                # Only if in game
+                ingame = False
+                g = games[0] # just to make the linter stop whining that
+                            # g might be undefined
+                for g in games:
+                    logging.debug('test')
+                    if addr in (g.p1addr, g.p2addr):
+                        ingame = True
+                        break
+                logging.debug('2 ingame: %s', ingame)
+
+                if ingame:
+                    # Based on when we break, g will have the correct clients
+                    # Now, figure out which player number this is
+                    if sock == g.p1sock:
+                        p1 = True
                     else:
-                        # Add client to waiting room if they're not there already
-                        if sock not in waiting_clients:
-                            waiting_clients.append(sock)
-                            logging.debug('Added %s to waiting room', sock)
-                            logging.debug('%d clients in waiting room: %s', 
-                                        len(waiting_clients), waiting_clients)
+                        p1 = False
 
-                        if len(waiting_clients) >= 2:
-                            # If 2+ clients waiting, start game with the first 2 
-                            # members of waiting_clients
-                            decks = deal_cards()
-                            p1sock : socket.socket = waiting_clients.pop(0)
-                            p2sock : socket.socket = waiting_clients.pop(0)# was index 1
-                            print(p1sock, p2sock)
-                            g = Game(p1sock, p2sock,
-                                    p1sock.getpeername(), p2sock.getpeername(),
-                                    decks[0], decks[1], None, None, [], False)
-                            logging.info('New game between %s and %s', 
-                                        g.p1addr, g.p2addr)
-                            games.append(g)
-                            # Send GAMESTART message to clients
-                            g.p1sock.sendall(
-                                bytes([Command.GAMESTART.value]+g.p1deck))
-                            logging.debug('P1 deck sent: %s',
-                                decks[0])
-                            g.p2sock.sendall(
-                                bytes([Command.GAMESTART.value]+g.p2deck))
-                            logging.debug('P2 deck sent: %s',
-                                decks[1])
+                    # Payload = card ID (0 to 51)
+                    card_id = int(readexactly(sock, 1)[0])
+                    logging.debug('Card ID %d', card_id)
 
-                elif Command(req_type) == Command.PLAYCARD and len(games) > 0:
-                    # Only if in game
-                    ingame = False
-                    g = games[0] # just to make the linter stop whining that
-                                # g might be undefined
-                    for g in games:
-                        logging.debug('test')
-                        if addr in (g.p1addr, g.p2addr):
-                            ingame = True
-                            break
-                    logging.debug('2 ingame: %s', ingame)
-
-                    if ingame:
-                        # Based on when we break, g will have the correct clients
-                        # Now, figure out which player number this is
-                        if sock == g.p1sock:
-                            p1 = True
-                        else:
-                            p1 = False
-
-                        # Payload = card ID (0 to 51)
-                        card_id = int(readexactly(sock, 1)[0])
-                        print(card_id)
-
-                        if p1:
-                            g.p1play = card_id
-                        else:
-                            g.p2play = card_id
-
-                        # If we have both players' cards, compare them
-                        # and send back who won
-                        if g.p1play is not None and g.p2play is not None:
-                            result = compare_cards(g.p1play, g.p2play)
-                            # 1 = p1 wins
-                            # -1 = p2 wins
-                            # 0 = tie
-                            if result == 1:
-                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.WIN.value]))
-                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.LOSE.value]))
-                            elif result == -1:
-                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.LOSE.value]))
-                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.WIN.value]))
-                            else: # 0
-                                g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.DRAW.value]))
-                                g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
-                                                        Result.DRAW.value]))
+                    if p1:
+                        g.p1play = card_id
                     else:
-                        # If request is sent and we aren't in game at all,
-                        # request is invalid
-                        logging.warning('Bad request %d: %s isn’t in a game', 
-                                        req_type, addr)
-                        kill_game(g)
-                else: # the other commands are sent by the server to the client
-                    logging.warning('Bad request %d', req_type)
+                        g.p2play = card_id
+                    logging.debug('Current plays: %d, %d', g.p1play, g.p2play)
+
+                    # If we have both players' cards, compare them
+                    # and send back who won
+                    if g.p1play is not None and g.p2play is not None:
+                        result = compare_cards(g.p1play, g.p2play)
+                        # 1 = p1 wins
+                        # -1 = p2 wins
+                        # 0 = tie
+                        if result == 1:
+                            logging.debug('%s > %s, p1 wins',
+                                            g.p1play, g.p2play)
+                            g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.WIN.value]))
+                            g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.LOSE.value]))
+                        elif result == -1:
+                            logging.debug('%s < %s, p2 wins',
+                                            g.p1play, g.p2play)
+                            g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.LOSE.value]))
+                            g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.WIN.value]))
+                        else: # 0
+                            logging.debug('%s = %s, tie',
+                                            g.p1play, g.p2play)
+                            g.p1sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.DRAW.value]))
+                            g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
+                                                    Result.DRAW.value]))
+                else:
+                    # If request is sent and we aren't in game at all,
+                    # request is invalid
+                    logging.warning('Bad request %d: %s isn’t in a game', 
+                                    req_type, addr)
                     kill_game(g)
+            else: # the other commands are sent by the server to the client
+                logging.warning('Bad request %d', req_type)
+                kill_game(g)
 
     except KeyboardInterrupt:
+        server.server_close()
         return
     
 class WarHandler(socketserver.BaseRequestHandler):
@@ -281,7 +303,7 @@ async def client(host, port, loop):
             writer.write(bytes([Command.PLAYCARD.value, card]))
             logging.debug('Played card: %d', card)
             result = await reader.readexactly(2)
-            logging.debug('Result: %d', result)
+            logging.debug('Result: %s', result)
             if result[1] == Result.WIN.value:
                 myscore += 1
             elif result[1] == Result.LOSE.value:
