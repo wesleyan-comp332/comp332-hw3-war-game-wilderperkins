@@ -127,7 +127,6 @@ def serve_game(host, port):
     """
     try:
         server = socketserver.TCPServer((host, port), WarHandler)
-        server.timeout = .1
         while True:
             logging.debug('  ==== Loop ====  ')
             # Need to call separately instead of using handle_request
@@ -158,8 +157,6 @@ def serve_game(host, port):
 
             if Command(req_type) == Command.WANTGAME:
                 # Reject if client already in game
-                # TODO: Multithreading ignores any requests not involving
-                # either of the two clients (detect with sock/addr)
                 ingame = False
                 g = None
                 for g in games:
@@ -263,8 +260,7 @@ def serve_game(host, port):
                     # If we have both players' cards, compare them
                     # and send back who won
                     if g.p1play is not None and g.p2play is not None:
-                        # No playing cards that were never in your deck 
-                        # to begin with
+                        # No playing cards from the other player's deck
                         if g.p1play not in g.p1deck:
                             logging.warning('%d not in p1 deck', g.p1play)
                             kill_game(g)
