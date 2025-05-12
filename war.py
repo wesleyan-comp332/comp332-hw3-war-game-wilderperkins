@@ -63,11 +63,13 @@ def readexactly(sock: socket.socket, numbytes: int):
 
 def kill_game(game):
     """
-    TODO: If either client sends a bad message, immediately nuke the game.
+    If either client sends a bad message, immediately nuke the game.
     """
     game.p1sock.close()
     game.p2sock.close()
-    logging.info('Sockets closed')
+    logging.debug('Sockets closed')
+    games.remove(game)
+    logging.info('Game removed')
 
 def compare_cards(card1: int, card2: int):
     """
@@ -127,7 +129,7 @@ def serve_game(host, port):
         server = socketserver.TCPServer((host, port), WarHandler)
         server.timeout = .1
         while True:
-            print('==== Loop ====')
+            logging.debug('  ==== Loop ====  ')
             # Need to call separately instead of using handle_request
             # because we need to keep the socket and address
             if len(games) == 0:
@@ -143,10 +145,14 @@ def serve_game(host, port):
                 addr = games[0].p1addr
                 games[0].turn = not games[0].turn
 
-            raw_read = readexactly(sock, 1)
+            try:
+                raw_read = readexactly(sock, 1)
+            except OSError: # if socket closed, readexactly will fail
+                kill_game(games[0])
+
             if len(raw_read) == 0:
                 kill_game(games[0])
-                return
+                continue
             req_type = int(raw_read[0])
             logging.debug('req_type: %s (%s)', req_type, Command(req_type))
 
@@ -179,7 +185,6 @@ def serve_game(host, port):
                         decks = deal_cards()
                         p1sock : socket.socket = waiting_clients.pop(0)
                         p2sock : socket.socket = waiting_clients.pop(0)# was index 1
-                        print(p1sock, p2sock)
                         g = Game(p1sock, p2sock,
                                 p1sock.getpeername(), p2sock.getpeername(),
                                 decks[0], decks[1], None, None, [], False)
@@ -314,9 +319,9 @@ async def client(host, port, loop):
             result = "lost"
         else:
             result = "drew"
-        logging.debug("Game complete, I %s", result)
+        logging.info("Game complete, I %s", result)
         writer.close()
-        logging.debug('writer close')
+        logging.info('writer close')
         return 1
     except ConnectionResetError:
         logging.error("ConnectionResetError")
@@ -375,6 +380,5 @@ def main(args):
     logging.debug('loop close')
 
 if __name__ == "__main__":
-    # Changing logging to DEBUG
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     main(sys.argv[1:])
