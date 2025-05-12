@@ -31,7 +31,7 @@ p1deck p2deck p1play p2play discard')
 games = []
 
 # Stores the clients waiting to get connected to other clients
-waiting_clients = []
+waiting_clients : list[socket.socket] = []
 
 
 class Command(Enum):
@@ -136,7 +136,6 @@ class WarHandler(socketserver.BaseRequestHandler):
         logging.debug('sock: %s', sock)
         addr = self.client_address
         logging.debug('addr: %s', addr)
-        # TODO: figure out which game we're in based on sock/addr
 
         req_type = int(readexactly(sock, 1)[0])
         logging.debug('req_type: %s (%s)', req_type, Command(req_type))
@@ -146,6 +145,7 @@ class WarHandler(socketserver.BaseRequestHandler):
             # TODO: Multithreading will ignore any requests not involving
             # either of the two clients (detect with sock/addr)
             ingame = False
+            g = None
             for g in games:
                 if addr in (g.p1addr, g.p2addr):
                     ingame = True
@@ -157,25 +157,28 @@ class WarHandler(socketserver.BaseRequestHandler):
             else:
                 # Add client to waiting room if they're not there already
                 if (sock, addr) not in waiting_clients:
-                    waiting_clients.append( (sock, addr) )
+                    waiting_clients.append(sock)
+                    logging.debug('Added %s to waiting room', sock)
                     logging.debug('%d clients in waiting room: %s', 
                                 len(waiting_clients), 
                                 ' '.join([
-                                    str(x[1]) for x in waiting_clients
+                                str(x.getpeername()) for x in waiting_clients
                                 ]))
 
                 if len(waiting_clients) >= 2:
                     # If 2+ clients waiting, start game with the first 2 
                     # members of waiting_clients
                     decks = deal_cards()
-                    p1_sock_addr = waiting_clients.pop(0)
-                    p2_sock_addr = waiting_clients.pop(0) # was index 1
-                    g = Game(p1_sock_addr[0], p2_sock_addr[0],
-                            p1_sock_addr[1], p2_sock_addr[1],
+                    p1sock : socket.socket = waiting_clients.pop(0)
+                    p2sock : socket.socket = waiting_clients.pop(0)# was index 1
+                    print(p1sock, p2sock)
+                    g = Game(p1sock, p2sock,
+                            p1sock.getpeername(), p2sock.getpeername(),
                             decks[0], decks[1], None, None, [])
+                    logging.info('New game between %s and %s', 
+                                 g.p1addr, g.p2addr)
                     games.append(g)
                     # Send GAMESTART message to clients
-                    print(g.p1sock)
                     g.p1sock.sendall(
                         bytes([Command.GAMESTART.value]+g.p1deck))
                     logging.debug('P1 deck sent: %s',
