@@ -231,10 +231,11 @@ def serve_game(host, port):
                         g.p1play = card_id
                     else:
                         g.p2play = card_id
-                    logging.debug('Current plays: %d, %d', g.p1play, g.p2play)
+                    logging.debug('Current plays: %s, %s', g.p1play, g.p2play)
 
                     # If we have both players' cards, compare them
                     # and send back who won
+                    # TODO: reject already-played cards
                     if g.p1play is not None and g.p2play is not None:
                         result = compare_cards(g.p1play, g.p2play)
                         # 1 = p1 wins
@@ -261,6 +262,11 @@ def serve_game(host, port):
                                                     Result.DRAW.value]))
                             g.p2sock.sendall(bytes([Command.PLAYRESULT.value,
                                                     Result.DRAW.value]))
+                        # Regardless, we need to clear stuff
+                        g.discard.extend([g.p1play, g.p2play])
+                        g.p1play = None
+                        g.p2play = None
+
                 else:
                     # If request is sent and we aren't in game at all,
                     # request is invalid
