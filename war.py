@@ -23,11 +23,12 @@ p1addr, p2addr: tuple[str, int]
 p1deck, p2deck: list[int] - each player can only play cards in their deck
 p1play, p2play: int|None - store card each player wants to play till we get both
 discard: list[int] - list already-played cards to block their reuse
+turn: which socket to check next: False=p1, True=p2
 
 Score is handled on client side
 """
 Game = namedtuple("Game", 'p1sock p2sock p1addr p2addr \
-p1deck p2deck p1play p2play discard')
+p1deck p2deck p1play p2play discard turn')
 games = []
 
 # Stores the clients waiting to get connected to other clients
@@ -123,13 +124,22 @@ def serve_game(host, port):
     """
     try:
         with socketserver.TCPServer((host, port), WarHandler) as server:
+            server.timeout = .1
             while True:
                 print('==== Loop ====')
                 # Need to call separately instead of using handle_request
                 # because we need to keep the socket and address
-                (sock, addr) = server.get_request()
-                logging.debug('sock: %s', sock)
-                logging.debug('addr: %s', addr)
+                print(games)
+                if len(games) == 0:
+                    (sock, addr) = server.get_request()
+                    logging.debug('sock: %s', sock)
+                    logging.debug('addr: %s', addr)
+                elif games[0].turn: # i.e. if p2's turn
+                    sock = games[0].p2sock
+                    addr = games[0].p2addr
+                else: # i.e. if p1's turn
+                    sock = games[0].p1sock
+                    addr = games[0].p1addr
 
                 req_type = int(readexactly(sock, 1)[0])
                 logging.debug('req_type: %s (%s)', req_type, Command(req_type))
@@ -165,7 +175,7 @@ def serve_game(host, port):
                             print(p1sock, p2sock)
                             g = Game(p1sock, p2sock,
                                     p1sock.getpeername(), p2sock.getpeername(),
-                                    decks[0], decks[1], None, None, [])
+                                    decks[0], decks[1], None, None, [], False)
                             logging.info('New game between %s and %s', 
                                         g.p1addr, g.p2addr)
                             games.append(g)
@@ -201,6 +211,7 @@ def serve_game(host, port):
 
                         # Payload = card ID (0 to 51)
                         card_id = int(readexactly(sock, 1)[0])
+                        print(card_id)
 
                         if p1:
                             g.p1play = card_id
@@ -238,6 +249,7 @@ def serve_game(host, port):
                 else: # the other commands are sent by the server to the client
                     logging.warning('Bad request %d', req_type)
                     kill_game(g)
+
     except KeyboardInterrupt:
         return
     
@@ -284,16 +296,15 @@ async def client(host, port, loop):
         writer.close()
         logging.debug('writer close')
         return 1
-    # except ConnectionResetError:
-    #     logging.error("ConnectionResetError")
-    #     return 0
+    except ConnectionResetError:
+        logging.error("ConnectionResetError")
+        return 0
     except asyncio.IncompleteReadError:
         logging.error("asyncio.IncompleteReadError")
         return 0
-    # Commenting out so I can see the actual error msg
-    # except OSError:
-    #     logging.error("OSError")
-    #     return 0
+    except OSError:
+        logging.error("OSError")
+        return 0
 
 def main(args):
     """
