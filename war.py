@@ -31,16 +31,16 @@ Score is handled on client side
 # p1deck p2deck p1play p2play discard turn')
 class Game:
     def __init__(self, p1sock, p2sock, p1addr, p2addr, p1deck, p2deck, p1play, p2play, discard, turn):
-        self.p1sock = p1sock
-        self.p2sock = p2sock
-        self.p1addr = p1addr
-        self.p2addr = p2addr
-        self.p1deck = p1deck 
-        self.p2deck = p2deck
-        self.p1play = p1play
-        self.p2play = p2play
-        self.discard = discard
-        self.turn = turn
+        self.p1sock : socket.socket = p1sock
+        self.p2sock : socket.socket = p2sock
+        self.p1addr : tuple[str, int] = p1addr
+        self.p2addr : tuple[str, int] = p2addr
+        self.p1deck : list[int] = p1deck 
+        self.p2deck : list[int] = p2deck
+        self.p1play : int = p1play
+        self.p2play : int = p2play
+        self.discard : list[int] = discard
+        self.turn : bool = turn
 games = []
 
 # Stores the clients waiting to get connected to other clients
@@ -78,7 +78,9 @@ def kill_game(game):
     """
     TODO: If either client sends a bad message, immediately nuke the game.
     """
-    logging.info('TODO: kill_game')
+    game.p1sock.close()
+    game.p2sock.close()
+    logging.info('Sockets closed')
 
 def compare_cards(card1: int, card2: int):
     """
